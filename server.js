@@ -182,21 +182,19 @@ function connectRikWebSocket() {
         if (!rikCurrentSession || result.sid > rikCurrentSession) {  
           rikCurrentSession = result.sid;  
 
-          rikResults.unshift({  
-            sid: result.sid,  
-            d1: result.d1,  
-            d2: result.d2,  
-            d3: result.d3  
-          });  
+          // Only add to results if this is a new result (not just updating current session)
+          if (!rikResults.some(r => r.sid === result.sid)) {
+            rikResults.unshift({  
+              sid: result.sid,  
+              d1: result.d1,  
+              d2: result.d2,  
+              d3: result.d3  
+            });  
 
-          if (rikResults.length > 50) rikResults.pop();  
+            if (rikResults.length > 50) rikResults.pop();  
+          }
 
           console.log(`📥 Phiên mới ${result.sid} → ${getTX(result.d1, result.d2, result.d3)}`);  
-            
-          setTimeout(() => {  
-            if (rikWS) rikWS.close();  
-            connectRikWebSocket();  
-          }, 1000);  
         }  
       }  
 
@@ -212,6 +210,9 @@ function connectRikWebSocket() {
           .sort((a, b) => b.sid - a.sid);  
 
         rikResults = history.slice(0, 50);  
+        if (rikResults.length > 0) {
+          rikCurrentSession = rikResults[0].sid;
+        }
         console.log("📦 Đã tải lịch sử các phiên gần nhất.");  
       }  
 
@@ -257,12 +258,12 @@ fastify.get("/api/taixiu/sunwin", async () => {
 
   return {
     id: "binhtool90",
-    phien_truoc: (validResults[1]?.sid || 0) + 1, // Increment by 1
+    phien_truoc: validResults[1]?.sid || "N/A",
     ket_qua: ket_qua,
     xuc_xac_1: current.d1,
     xuc_xac_2: current.d2,
     xuc_xac_3: current.d3,
-    phien_hien_tai: (current.sid || 0) + 2, // Increment by 2
+    phien_hien_tai: current.sid,
     pattern: pattern,
     du_doan: prediction,
     do_tin_cay: `${confidence}%`
