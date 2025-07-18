@@ -257,12 +257,12 @@ fastify.get("/api/taixiu/sunwin", async () => {
 
   return {
     id: "binhtool90",
-    phien_truoc: validResults[1]?.sid || "N/A",
+    phien_truoc: (validResults[1]?.sid || 0) + 1, // Increment by 1
     ket_qua: ket_qua,
     xuc_xac_1: current.d1,
     xuc_xac_2: current.d2,
     xuc_xac_3: current.d3,
-    phien_hien_tai: current.sid,
+    phien_hien_tai: (current.sid || 0) + 2, // Increment by 2
     pattern: pattern,
     du_doan: prediction,
     do_tin_cay: `${confidence}%`
