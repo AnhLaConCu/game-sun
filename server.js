@@ -1,60 +1,47 @@
 const Fastify = require("fastify");
 const cors = require("@fastify/cors");
 const WebSocket = require("ws");
-const fs = require("fs");
-const path = require("path");
 
-const TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJhbW91bnQiOjAsImdlbmRlciI6MCwiZGlzcGxheU5hbWUiOiJhcGlzdW53aW52YyIsInBob25lVmVyaWZpZWQiOmZhbHNlLCJib3QiOjAsImF2YXRhciI6Imh0dHBzOi8vaW1hZ2VzLnN3aW5zaG9wLm5ldC9pbWFnZXMvYXZhdGFyL2F2YXRhcl8yMC5wbmciLCJ1c2VySWQiOiJkOTNkM2Q4NC1mMDY5LTRiM2YtOGRhYy1iNDcxNmE4MTIxNDMiLCJyZWdUaW1lIjoxNzUyMDQ1ODkzMjkyLCJwaG9uZSI6IiIsImN1c3RvbWVySWQiOjI3NjQ3ODE3MywiYnJhbmQiOiJzdW4ud2luIiwidXNlcm5hbWUiOiJTQ19hcGlzdW53aW4xMjMiLCJ0aW1lc3RhbXAiOjE3NTI4NTQ4NjY1OTJ9.CUtQHHxKv-Rk9O-BY0m6UnS61JfIAO_SJt1c19W4xfM"; // rút gọn token
+const TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJhbW91bnQiOjAsImdlbmRlciI6MCwiZGlzcGxheU5hbWUiOiJhcGlzdW53aW52YyIsInBob25lVmVyaWZpZWQiOmZhbHNlLCJib3QiOjAsImF2YXRhciI6Imh0dHBzOi8vaW1hZ2VzLnN3aW5zaG9wLm5ldC9pbWFnZXMvYXZhdGFyL2F2YXRhcl8yMC5wbmciLCJ1c2VySWQiOiJkOTNkM2Q4NC1mMDY5LTRiM2YtOGRhYy1iNDcxNmE4MTIxNDMiLCJyZWdUaW1lIjoxNzUyMDQ1ODkzMjkyLCJwaG9uZSI6IiIsImN1c3RvbWVySWQiOjI3NjQ3ODE3MywiYnJhbmQiOiJzdW4ud2luIiwidXNlcm5hbWUiOiJTQ19hcGlzdW53aW4xMjMiLCJ0aW1lc3RhbXAiOjE3NTI4NTQ4NjY1OTJ9.CUtQHHxKv-Rk9O-BY0m6UnS61JfIAO_SJt1c19W4xfM";
 
 const fastify = Fastify({ logger: false });
 const PORT = process.env.PORT || 3001;
-const HISTORY_FILE = path.join(__dirname, 'taixiu_history.json');
 
 let rikResults = [];
 let rikCurrentSession = null;
 let rikWS = null;
 let rikIntervalCmd = null;
 
-function loadHistory() {
-  try {
-    if (fs.existsSync(HISTORY_FILE)) {
-      rikResults = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
-      console.log(`📚 Loaded ${rikResults.length} history records`);
-    }
-  } catch (err) {
-    console.error('Error loading history:', err);
-  }
-}
-
-function saveHistory() {
-  try {
-    fs.writeFileSync(HISTORY_FILE, JSON.stringify(rikResults), 'utf8');
-  } catch (err) {
-    console.error('Error saving history:', err);
-  }
-}
-
 function decodeBinaryMessage(buffer) {
   try {
     const str = buffer.toString();
     if (str.startsWith("[")) return JSON.parse(str);
-    let position = 0, result = [];
+
+    let position = 0;
+    const result = [];
+
     while (position < buffer.length) {
       const type = buffer.readUInt8(position++);
       if (type === 1) {
-        const len = buffer.readUInt16BE(position); position += 2;
-        result.push(buffer.toString('utf8', position, position + len));
-        position += len;
+        const length = buffer.readUInt16BE(position);
+        position += 2;
+        result.push(buffer.toString("utf8", position, position + length));
+        position += length;
       } else if (type === 2) {
-        result.push(buffer.readInt32BE(position)); position += 4;
+        result.push(buffer.readInt32BE(position));
+        position += 4;
       } else if (type === 3 || type === 4) {
-        const len = buffer.readUInt16BE(position); position += 2;
-        result.push(JSON.parse(buffer.toString('utf8', position, position + len)));
-        position += len;
+        const length = buffer.readUInt16BE(position);
+        position += 2;
+        const str = buffer.toString("utf8", position, position + length);
+        position += length;
+        result.push(JSON.parse(str));
       } else {
-        console.warn("Unknown binary type:", type); break;
+        console.warn("Unknown binary type:", type);
+        break;
       }
     }
+
     return result.length === 1 ? result[0] : result;
   } catch (e) {
     console.error("Binary decode error:", e);
@@ -63,65 +50,42 @@ function decodeBinaryMessage(buffer) {
 }
 
 function getTX(d1, d2, d3) {
-  return d1 + d2 + d3 >= 11 ? "T" : "X";
+  const sum = d1 + d2 + d3;
+  return sum >= 11 ? "T" : "X";
 }
 
-function analyzePatterns(history) {
+function predictNextResult(history) {
   if (history.length < 5) return null;
-  const patternHistory = history.slice(0, 30).map(item => getTX(item.d1, item.d2, item.d3)).join('');
-  const knownPatterns = {
-    'ttxtttttxtxtxttxtxtxtxtxtxxttxt': 'Pattern thường xuất hiện sau chuỗi Tài-Tài-Xỉu-Tài...',
-    'ttttxxxx': '4 Tài liên tiếp thường đi kèm 4 Xỉu',
-    'xtxtxtxt': 'Xen kẽ Tài Xỉu ổn định',
-    'ttxxttxxttxx': 'Chu kỳ 2 Tài 2 Xỉu'
-  };
-  for (const [pattern, description] of Object.entries(knownPatterns)) {
-    if (patternHistory.includes(pattern)) {
-      return {
-        pattern, description,
-        confidence: Math.floor(Math.random() * 20) + 80
-      };
+
+  const lastResults = history.slice(0, 5).map(item => getTX(item.d1, item.d2, item.d3));
+  const countT = lastResults.filter(r => r === "T").length;
+  const countX = lastResults.filter(r => r === "X").length;
+
+  if (countT >= 4) return "X";
+  if (countX >= 4) return "T";
+
+  const lastSums = history.slice(0, 5).map(item => item.d1 + item.d2 + item.d3);
+  const avgSum = lastSums.reduce((a, b) => a + b, 0) / 5;
+
+  if (avgSum > 11.5) return "X";
+  if (avgSum < 10.5) return "T";
+
+  let isAlternating = true;
+  for (let i = 1; i < lastResults.length; i++) {
+    if (lastResults[i] === lastResults[i - 1]) {
+      isAlternating = false;
+      break;
     }
   }
-  return null;
-}
+  if (isAlternating) return lastResults.at(-1) === "T" ? "X" : "T";
 
-function predictNext(history) {
-  if (history.length < 4) return history.at(-1) || "Tài";
-  const last = history.at(-1);
-
-  if (history.slice(-4).every(k => k === last)) return last;
-
-  if (history.length >= 4 &&
-    history.at(-1) === history.at(-2) &&
-    history.at(-3) === history.at(-4) &&
-    history.at(-1) !== history.at(-3)) {
-    return last === "Tài" ? "Xỉu" : "Tài";
-  }
-
-  const last4 = history.slice(-4);
-  if (last4[0] !== last4[1] && last4[1] === last4[2] && last4[2] !== last4[3]) {
-    return last === "Tài" ? "Xỉu" : "Tài";
-  }
-
-  const pattern = history.slice(-6, -3).toString();
-  const latest = history.slice(-3).toString();
-  if (pattern === latest) return history.at(-1);
-
-  if (new Set(history.slice(-3)).size === 3) {
-    return Math.random() < 0.5 ? "Tài" : "Xỉu";
-  }
-
-  const count = history.reduce((acc, val) => {
-    acc[val] = (acc[val] || 0) + 1;
-    return acc;
-  }, {});
-  return (count["Tài"] || 0) > (count["Xỉu"] || 0) ? "Xỉu" : "Tài";
+  return Math.random() > 0.5 ? "T" : "X";
 }
 
 function sendRikCmd1005() {
-  if (rikWS?.readyState === WebSocket.OPEN) {
-    rikWS.send(JSON.stringify([6, "MiniGame", "taixiuPlugin", { cmd: 1005 }]));
+  if (rikWS && rikWS.readyState === WebSocket.OPEN) {
+    const payload = [6, "MiniGame", "taixiuPlugin", { cmd: 1005 }];
+    rikWS.send(JSON.stringify(payload));
   }
 }
 
@@ -130,18 +94,24 @@ function connectRikWebSocket() {
   rikWS = new WebSocket(`wss://websocket.azhkthg1.net/websocket?token=${TOKEN}`);
 
   rikWS.on("open", () => {
-    const authPayload = [1, "MiniGame", "SC_apisunwin123", "binhlamtool90", {
-      info: JSON.stringify({
-        ipAddress: "14.191.224.110",
-        wsToken: TOKEN,
-        userId: "d93d3d84-f069-4b3f-8dac-b4716a812143",
-        username: "SC_apisunwin123",
-        timestamp: 1752854866592
-      }),
-      signature: "6099DBA6FDBA7D5CA88084542CC1A1F0E2E923B5BE0EE3C18AF7FC9956418868A620B9A8348021D7A86D6E3261A359D14250FEC3746DABD0FC73A299D9C880893EAF2BDFFD3B16CB2F081E021E8B19AF87354FA4F0F27631CCBD5DA3767A75E014BEDEEABF9DD4BEF9D38376082CAECF79B306D902F76C65AE7E077271A98241",
-      pid: 5,
-      subi: true
-    }];
+    const authPayload = [
+      1,
+      "MiniGame",
+      "SC_apisunwin123",
+      "binhlamtool90",
+      {
+        info: JSON.stringify({
+          ipAddress: "14.191.224.110",
+          wsToken: TOKEN,
+          userId: "d93d3d84-f069-4b3f-8dac-b4716a812143",
+          username: "SC_apisunwin123",
+          timestamp: 1752854866592
+        }),
+        signature: "6099DBA6FDBA7D5CA88084542CC1A1F0E2E923B5BE0EE3C18AF7FC9956418868A620B9A8348021D7A86D6E3261A359D14250FEC3746DABD0FC73A299D9C880893EAF2BDFFD3B16CB2F081E021E8B19AF87354FA4F0F27631CCBD5DA3767A75E014BEDEEABF9DD4BEF9D38376082CAECF79B306D902F76C65AE7E077271A98241",
+        pid: 5,
+        subi: true
+      }
+    ];
     rikWS.send(JSON.stringify(authPayload));
     clearInterval(rikIntervalCmd);
     rikIntervalCmd = setInterval(sendRikCmd1005, 5000);
@@ -149,24 +119,35 @@ function connectRikWebSocket() {
 
   rikWS.on("message", (data) => {
     try {
-      const json = typeof data === 'string' ? JSON.parse(data) : decodeBinaryMessage(data);
+      const json = typeof data === "string" ? JSON.parse(data) : decodeBinaryMessage(data);
       if (!json) return;
 
-      if (Array.isArray(json) && json[3]?.res?.d1) {
-        const res = json[3].res;
-        if (!rikCurrentSession || res.sid > rikCurrentSession) {
-          rikCurrentSession = res.sid;
-          rikResults.unshift({ sid: res.sid, d1: res.d1, d2: res.d2, d3: res.d3, timestamp: Date.now() });
-          if (rikResults.length > 100) rikResults.pop();
-          saveHistory();
-          console.log(`📥 Phiên mới ${res.sid} → ${getTX(res.d1, res.d2, res.d3)}`);
-          setTimeout(() => { rikWS?.close(); connectRikWebSocket(); }, 1000);
+      if (Array.isArray(json) && json[3]?.res?.d1 && json[3]?.res?.sid) {
+        const result = json[3].res;
+        if (!rikCurrentSession || result.sid > rikCurrentSession) {
+          rikCurrentSession = result.sid;
+
+          rikResults.unshift({
+            sid: result.sid,
+            d1: result.d1,
+            d2: result.d2,
+            d3: result.d3
+          });
+
+          if (rikResults.length > 50) rikResults.pop();
+
+          console.log(`📥 Phiên mới ${result.sid} → ${getTX(result.d1, result.d2, result.d3)}`);
+
+          setTimeout(() => {
+            if (rikWS) rikWS.close();
+            connectRikWebSocket();
+          }, 1000);
         }
       } else if (Array.isArray(json) && json[1]?.htr) {
-        rikResults = json[1].htr.map(i => ({
-          sid: i.sid, d1: i.d1, d2: i.d2, d3: i.d3, timestamp: Date.now()
-        })).sort((a, b) => b.sid - a.sid).slice(0, 100);
-        saveHistory();
+        rikResults = json[1].htr
+          .map(item => ({ sid: item.sid, d1: item.d1, d2: item.d2, d3: item.d3 }))
+          .sort((a, b) => b.sid - a.sid)
+          .slice(0, 50);
         console.log("📦 Đã tải lịch sử các phiên gần nhất.");
       }
     } catch (e) {
@@ -185,49 +166,31 @@ function connectRikWebSocket() {
   });
 }
 
-loadHistory();
 connectRikWebSocket();
+
 fastify.register(cors);
 
+// ✅ API dạng tối giản chỉ gồm 5 trường như yêu cầu
 fastify.get("/api/taixiu/sunwin", async () => {
-  const valid = rikResults.filter(r => r.d1 && r.d2 && r.d3);
-  if (!valid.length) return { message: "Không có dữ liệu." };
+  const validResults = rikResults.filter(item => item.d1 && item.d2 && item.d3);
+  if (validResults.length === 0) {
+    return { message: "Không có dữ liệu." };
+  }
 
-  const current = valid[0];
+  const current = validResults[0];
   const sum = current.d1 + current.d2 + current.d3;
-  const ket_qua = sum >= 11 ? "Tài" : "Xỉu";
+  const current_result = sum >= 11 ? "Tài" : "Xỉu";
 
-  const recentTX = valid.map(r => getTX(r.d1, r.d2, r.d3)).slice(0, 30);
-  const predText = predictNext(recentTX);
-  const prediction = {
-    prediction: predText === "Tài" ? "T" : "X",
-    reason: "Dự đoán theo mẫu cầu nâng cao",
-    confidence: 80
-  };
+  const du_doan = predictNextResult(validResults);
+  const prediction = du_doan === "T" ? "Tài" : "Xỉu";
 
   return {
-    phien: current.sid,
-    xuc_xac_1: current.d1,
-    xuc_xac_2: current.d2,
-    xuc_xac_3: current.d3,
-    tong: sum,
-    ket_qua,
-    du_doan: prediction.prediction === "T" ? "Tài" : "Xỉu",
-    ty_le_thanh_cong: `${prediction.confidence}%`,
-    giai_thich: prediction.reason,
-    pattern: analyzePatterns(valid)?.description || "Không phát hiện mẫu cụ thể"
+    current_result,
+    current_session: current.sid,
+    next_session: current.sid + 1,
+    prediction,
+    timestamp: new Date().toISOString()
   };
-});
-
-fastify.get("/api/taixiu/history", async () => {
-  const valid = rikResults.filter(r => r.d1 && r.d2 && r.d3);
-  if (!valid.length) return { message: "Không có dữ liệu lịch sử." };
-  return valid.map(i => ({
-    session: i.sid,
-    dice: [i.d1, i.d2, i.d3],
-    total: i.d1 + i.d2 + i.d3,
-    result: getTX(i.d1, i.d2, i.d3) === "T" ? "Tài" : "Xỉu"
-  })).map(JSON.stringify).join("\n");
 });
 
 const start = async () => {
