@@ -139,10 +139,13 @@ function connectRikWebSocket() {
     info: JSON.stringify({
       ipAddress: "2001:ee0:5708:7700:8af3:abd1:fe2a:c62c",
       wsToken: TOKEN,
+      locale: "vi",
       userId: "d93d3d84-f069-4b3f-8dac-b4716a812143",
       username: "SC_apisunwin123",
       timestamp: 1753443723662,
       refreshToken: "dd38d05401bb48b4ac3c2f6dc37f36d9.f22dccad89bb4e039814b7de64b05d63",
+      avatar: "https://images.swinshop.net/images/avatar/avatar_20.png",
+      platformId: 5
     }),
     signature: "4FD3165D59BD21DA76B4448EA62E81972BCD54BE0EDBC5291D2415274DA522089BF9318E829A67D07EC78783543D17E75671CBD6FDF60B42B55643F13B66DEB7B0510DE995A8C7C8EDBA4990CE3294C4340D86BF78B02A0E90C6565D1A32EAA894F7384302602CB2703C20981244103E42817257592D42828D6EDB0BB781ADA1",
     pid: 5,
