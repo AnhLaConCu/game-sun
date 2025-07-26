@@ -1,8 +1,13 @@
-const Fastify = require("fastify");
-const cors = require("@fastify/cors");
-const WebSocket = require("ws");
-const fs = require("fs");
-const path = require("path");
+import Fastify from "fastify";
+import cors from "@fastify/cors";
+import WebSocket from "ws";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from 'url';
+
+// Get __dirname equivalent in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJnZW5kZXIiOjAsImNhblZpZXdTdGF0IjpmYWxzZSwiZGlzcGxheU5hbWUiOiJhcGlzdW53aW52YyIsImJvdCI6MCwiaXNNZXJjaGFudCI6ZmFsc2UsInZlcmlmaWVkQmFua0FjY291bnQiOmZhbHNlLCJwbGF5RXZlbnRMb2JieSI6ZmFsc2UsImN1c3RvbWVySWQiOjI3NjQ3ODE3MywiYWZmSWQiOiJkOTNkM2Q4NC1mMDY5LTRiM2YtOGRhYy1iNDcxNmE4MTIxNDMiLCJiYW5uZWQiOmZhbHNlLCJicmFuZCI6InN1bi53aW4iLCJ0aW1lc3RhbXAiOjE3NTM0NDM3MjM2NjIsImxvY2tHYW1lcyI6W10sImFtb3VudCI6MCwibG9ja0NoYXQiOmZhbHNlLCJwaG9uZVZlcmlmaWVkIjpmYWxzZSwiaXBBZGRyZXNzIjoiMjAwMTplZTA6NTcwODo3NzAwOjhhZjM6YWJkMTpmZTJhOmM2MmMiLCJtdXRlIjpmYWxzZSwiYXZhdGFyIjoiaHR0cHM6Ly9pbWFnZXMuc3dpbnNob3AubmV0L2ltYWdlcy9hdmF0YXIvYXZhdGFyXzIwLnBuZyIsInBsYXRmb3JtSWQiOjUsInVzZXJJZCI6ImQ5M2QzZDg0LWYwNjktNGIzZi04ZGFjLWI0NzE2YTgxMjE0MyIsInJlZ1RpbWUiOjE3NTIwNDU4OTMyOTIsInBob25lIjoiIiwiZGVwb3NpdCI6ZmFsc2UsInVzZXJuYW1lIjoiU0NfYXBpc3Vud2luMTIzIn0.a-KRvIGfMqxtBq3WenudxP8pFx7mxj33iIZm-AklInk";
 
@@ -96,7 +101,7 @@ function detectPattern(historyStr) {
   
   for (const [name, check] of Object.entries(patterns)) {
     if (check(historyStr)) {
-      const confidence = 0.7 + (Math.random() * 0.3); // Base confidence + some variance
+      const confidence = 0.7 + (Math.random() * 0.3);
       detectedPatterns.push({ name, confidence });
     }
   }
@@ -131,7 +136,6 @@ function predictWithPattern(historyStr, patternInfo) {
 function getLogisticFeatures(historyStr) {
   if (!historyStr) return Array(6).fill(0.0);
 
-  // Current streak length
   let currentStreak = 1;
   const last = historyStr[historyStr.length - 1];
   for (let i = historyStr.length - 2; i >= 0; i--) {
@@ -139,7 +143,6 @@ function getLogisticFeatures(historyStr) {
     else break;
   }
 
-  // Previous streak length
   let prevStreakLen = 0;
   if (historyStr.length > currentStreak) {
     const prevVal = historyStr[historyStr.length - currentStreak - 1];
@@ -149,26 +152,22 @@ function getLogisticFeatures(historyStr) {
     }
   }
 
-  // Recent balance (last 20)
   const recent = historyStr.slice(-20);
   const taiRecent = recent.filter(x => x === 'Tài').length;
   const xiuRecent = recent.length - taiRecent;
   const balanceShort = (taiRecent - xiuRecent) / recent.length;
 
-  // Long-term balance (last 100)
   const longTerm = historyStr.slice(-100);
   const taiLong = longTerm.filter(x => x === 'Tài').length;
   const xiuLong = longTerm.length - taiLong;
   const balanceLong = (taiLong - xiuLong) / longTerm.length;
 
-  // Volatility
   let changes = 0;
   for (let i = 1; i < recent.length; i++) {
     if (recent[i] !== recent[i-1]) changes++;
   }
   const volatility = changes / (recent.length - 1);
 
-  // Alternations in last 10
   const last10 = historyStr.slice(-10);
   let alternations = 0;
   for (let i = 1; i < last10.length; i++) {
@@ -198,17 +197,14 @@ function smartPredict(fullHistory, analyzeHistory, currentDice) {
   const patternInfo = detectPattern(historyStr);
   const [pattPred, pattConf] = predictWithPattern(historyStr, patternInfo);
 
-  // Markov prediction (simple)
   const last = historyStr[historyStr.length - 1];
   const markovPred = Math.random() > 0.4 ? last : (last === 'Tài' ? 'Xỉu' : 'Tài');
   const markovConf = 0.7;
 
-  // Logistic regression features
   const features = getLogisticFeatures(historyStr);
   const logisticPred = features[2] > 0 ? 'Tài' : 'Xỉu';
   const logisticConf = Math.abs(features[2]) * 0.8 + 0.5;
 
-  // Combine predictions
   const predictions = [
     { pred: pattPred, weight: pattConf * 0.5 },
     { pred: markovPred, weight: markovConf * 0.3 },
@@ -224,7 +220,6 @@ function smartPredict(fullHistory, analyzeHistory, currentDice) {
   const finalPred = taiScore > xiuScore ? 'Tài' : 'Xỉu';
   const confidence = Math.round((Math.max(taiScore, xiuScore) / (taiScore + xiuScore)) * 100);
 
-  // Apply meta-logic (anti-streak)
   let reason = patternInfo ? `Phát hiện mẫu ${patternInfo.name}` : "Phân tích tổng hợp";
   if (patternInfo?.name.includes("Bệt") && patternInfo.confidence > 0.8) {
     const streakLen = historyStr.lastIndexOf(last === 'Tài' ? 'Xỉu' : 'Tài');
@@ -365,7 +360,7 @@ function connectRikWebSocket() {
 // ========================
 // 🚀 API ENDPOINTS
 // ========================
-fastify.register(cors);
+await fastify.register(cors);
 
 fastify.get("/api/taixiu/sunwin", async () => {
   const valid = rikResults.filter(r => r.d1 && r.d2 && r.d3);
@@ -375,7 +370,6 @@ fastify.get("/api/taixiu/sunwin", async () => {
   const sum = current.d1 + current.d2 + current.d3;
   const ket_qua = sum >= 11 ? "Tài" : "Xỉu";
 
-  // Prepare history for prediction
   const historyData = valid.map(i => ({
     result: getTX(i.d1, i.d2, i.d3) === "T" ? "Tài" : "Xỉu",
     dice: [i.d1, i.d2, i.d3],
@@ -383,7 +377,6 @@ fastify.get("/api/taixiu/sunwin", async () => {
     sid: i.sid
   }));
 
-  // Get advanced prediction
   const [prediction, reason] = smartPredict(
     valid, 
     historyData.slice(0, 30), 
@@ -399,7 +392,7 @@ fastify.get("/api/taixiu/sunwin", async () => {
     tong: sum,
     ket_qua,
     du_doan: prediction,
-    ty_le_thanh_cong: `${Math.floor(Math.random() * 10) + 85}%`, // Simulated confidence
+    ty_le_thanh_cong: `${Math.floor(Math.random() * 10) + 85}%`,
     giai_thich: reason,
     pattern: valid.slice(0, 13).map(r => getTX(r.d1, r.d2, r.d3).toLowerCase()).join(''),
     lich_su: historyData.slice(0, 10).map(h => h.result).join(', ')
