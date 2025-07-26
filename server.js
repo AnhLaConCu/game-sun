@@ -3,18 +3,23 @@ const cors = require("@fastify/cors");
 const WebSocket = require("ws");
 const fs = require("fs");
 const path = require("path");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 
+// Configuration
 const TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJnZW5kZXIiOjAsImNhblZpZXdTdGF0IjpmYWxzZSwiZGlzcGxheU5hbWUiOiJhcGlzdW53aW52YyIsImJvdCI6MCwiaXNNZXJjaGFudCI6ZmFsc2UsInZlcmlmaWVkQmFua0FjY291bnQiOmZhbHNlLCJwbGF5RXZlbnRMb2JieSI6ZmFsc2UsImN1c3RvbWVySWQiOjI3NjQ3ODE3MywiYWZmSWQiOiJkOTNkM2Q4NC1mMDY5LTRiM2YtOGRhYy1iNDcxNmE4MTIxNDMiLCJiYW5uZWQiOmZhbHNlLCJicmFuZCI6InN1bi53aW4iLCJ0aW1lc3RhbXAiOjE3NTM0NDM3MjM2NjIsImxvY2tHYW1lcyI6W10sImFtb3VudCI6MCwibG9ja0NoYXQiOmZhbHNlLCJwaG9uZVZlcmlmaWVkIjpmYWxzZSwiaXBBZGRyZXNzIjoiMjAwMTplZTA6NTcwODo3NzAwOjhhZjM6YWJkMTpmZTJhOmM2MmMiLCJtdXRlIjpmYWxzZSwiYXZhdGFyIjoiaHR0cHM6Ly9pbWFnZXMuc3dpbnNob3AubmV0L2ltYWdlcy9hdmF0YXIvYXZhdGFyXzIwLnBuZyIsInBsYXRmb3JtSWQiOjUsInVzZXJJZCI6ImQ5M2QzZDg0LWYwNjktNGIzZi04ZGFjLWI0NzE2YTgxMjE0MyIsInJlZ1RpbWUiOjE3NTIwNDU4OTMyOTIsInBob25lIjoiIiwiZGVwb3NpdCI6ZmFsc2UsInVzZXJuYW1lIjoiU0NfYXBpc3Vud2luMTIzIn0.a-KRvIGfMqxtBq3WenudxP8pFx7mxj33iIZm-AklInk";
-
-const fastify = Fastify({ logger: false });
 const PORT = process.env.PORT || 3001;
 const HISTORY_FILE = path.join(__dirname, 'taixiu_history.json');
+const GEMINI_API_KEY = "AIzaSyCIuS0K74VMyTy71qfCcUh6h5_XgzH1FZA";
 
+// Initialize services
+const fastify = Fastify({ logger: false });
+const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 let rikResults = [];
 let rikCurrentSession = null;
 let rikWS = null;
 let rikIntervalCmd = null;
 
+// Load history from file
 function loadHistory() {
   try {
     if (fs.existsSync(HISTORY_FILE)) {
@@ -26,6 +31,7 @@ function loadHistory() {
   }
 }
 
+// Save history to file
 function saveHistory() {
   try {
     fs.writeFileSync(HISTORY_FILE, JSON.stringify(rikResults), 'utf8');
@@ -34,10 +40,12 @@ function saveHistory() {
   }
 }
 
+// Decode binary WebSocket messages
 function decodeBinaryMessage(buffer) {
   try {
     const str = buffer.toString();
     if (str.startsWith("[")) return JSON.parse(str);
+    
     let position = 0, result = [];
     while (position < buffer.length) {
       const type = buffer.readUInt8(position++);
@@ -62,12 +70,38 @@ function decodeBinaryMessage(buffer) {
   }
 }
 
+// Determine Tài/Xỉu result
 function getTX(d1, d2, d3) {
   return d1 + d2 + d3 >= 11 ? "T" : "X";
 }
 
+// Analyze patterns with Gemini AI
+async function analyzeWithGemini(pattern) {
+  try {
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    
+    const prompt = `Phân tích mẫu Tài Xỉu sau (T=Tài, X=Xỉu): ${pattern}
+    - Dự đoán 3 khả năng tiếp theo với tỷ lệ phần trăm
+    - Xác định các chuỗi lặp lại
+    - Giải thích lý do bằng tiếng Việt
+    - Định dạng phản hồi:
+    Dự đoán: [dự đoán]
+    Lý do: [giải thích]
+    Độ tin cậy: [tỷ lệ]%`;
+    
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    return response.text();
+  } catch (error) {
+    console.error("Gemini AI error:", error);
+    return null;
+  }
+}
+
+// Traditional pattern analysis (fallback)
 function analyzePatterns(history) {
   if (history.length < 5) return null;
+  
   const patternHistory = history.slice(0, 30).map(item => getTX(item.d1, item.d2, item.d3)).join('');
   const knownPatterns = {
     'ttxtttttxtxtxttxtxtxtxtxtxxttxt': 'Pattern thường xuất hiện sau chuỗi Tài-Tài-Xỉu-Tài...',
@@ -75,10 +109,12 @@ function analyzePatterns(history) {
     'xtxtxtxt': 'Xen kẽ Tài Xỉu ổn định',
     'ttxxttxxttxx': 'Chu kỳ 2 Tài 2 Xỉu'
   };
+  
   for (const [pattern, description] of Object.entries(knownPatterns)) {
     if (patternHistory.includes(pattern)) {
       return {
-        pattern, description,
+        pattern, 
+        description,
         confidence: Math.floor(Math.random() * 20) + 80
       };
     }
@@ -86,6 +122,7 @@ function analyzePatterns(history) {
   return null;
 }
 
+// Traditional prediction (fallback)
 function predictNext(history) {
   if (history.length < 4) return history.at(-1) || "Tài";
   const last = history.at(-1);
@@ -93,9 +130,9 @@ function predictNext(history) {
   if (history.slice(-4).every(k => k === last)) return last;
 
   if (history.length >= 4 &&
-    history.at(-1) === history.at(-2) &&
-    history.at(-3) === history.at(-4) &&
-    history.at(-1) !== history.at(-3)) {
+      history.at(-1) === history.at(-2) &&
+      history.at(-3) === history.at(-4) &&
+      history.at(-1) !== history.at(-3)) {
     return last === "Tài" ? "Xỉu" : "Tài";
   }
 
@@ -119,39 +156,41 @@ function predictNext(history) {
   return (count["Tài"] || 0) > (count["Xỉu"] || 0) ? "Xỉu" : "Tài";
 }
 
+// WebSocket commands
 function sendRikCmd1005() {
   if (rikWS?.readyState === WebSocket.OPEN) {
     rikWS.send(JSON.stringify([6, "MiniGame", "taixiuPlugin", { cmd: 1005 }]));
   }
 }
 
+// WebSocket connection
 function connectRikWebSocket() {
   console.log("🔌 Connecting to SunWin WebSocket...");
   rikWS = new WebSocket(`wss://websocket.azhkthg1.net/websocket?token=${TOKEN}`);
 
   rikWS.on("open", () => {
     const authPayload = [
-  1,
-  "MiniGame",
-  "SC_apisunwin123",
-  "binhlamtool90",
-  {
-    info: JSON.stringify({
-      ipAddress: "2001:ee0:5708:7700:8af3:abd1:fe2a:c62c",
-      wsToken: TOKEN,
-      locale: "vi",
-      userId: "d93d3d84-f069-4b3f-8dac-b4716a812143",
-      username: "SC_apisunwin123",
-      timestamp: 1753443723662,
-      refreshToken: "dd38d05401bb48b4ac3c2f6dc37f36d9.f22dccad89bb4e039814b7de64b05d63",
-      avatar: "https://images.swinshop.net/images/avatar/avatar_20.png",
-      platformId: 5
-    }),
-    signature: "4FD3165D59BD21DA76B4448EA62E81972BCD54BE0EDBC5291D2415274DA522089BF9318E829A67D07EC78783543D17E75671CBD6FDF60B42B55643F13B66DEB7B0510DE995A8C7C8EDBA4990CE3294C4340D86BF78B02A0E90C6565D1A32EAA894F7384302602CB2703C20981244103E42817257592D42828D6EDB0BB781ADA1",
-    pid: 5,
-    subi: true
-  }
-];
+      1,
+      "MiniGame",
+      "SC_apisunwin123",
+      "binhlamtool90",
+      {
+        info: JSON.stringify({
+          ipAddress: "2001:ee0:5708:7700:8af3:abd1:fe2a:c62c",
+          wsToken: TOKEN,
+          locale: "vi",
+          userId: "d93d3d84-f069-4b3f-8dac-b4716a812143",
+          username: "SC_apisunwin123",
+          timestamp: 1753443723662,
+          refreshToken: "dd38d05401bb48b4ac3c2f6dc37f36d9.f22dccad89bb4e039814b7de64b05d63",
+          avatar: "https://images.swinshop.net/images/avatar/avatar_20.png",
+          platformId: 5
+        }),
+        signature: "4FD3165D59BD21DA76B4448EA62E81972BCD54BE0EDBC5291D2415274DA522089BF9318E829A67D07EC78783543D17E75671CBD6FDF60B42B55643F13B66DEB7B0510DE995A8C7C8EDBA4990CE3294C4340D86BF78B02A0E90C6565D1A32EAA894F7384302602CB2703C20981244103E42817257592D42828D6EDB0BB781ADA1",
+        pid: 5,
+        subi: true
+      }
+    ];
     rikWS.send(JSON.stringify(authPayload));
     clearInterval(rikIntervalCmd);
     rikIntervalCmd = setInterval(sendRikCmd1005, 5000);
@@ -162,25 +201,35 @@ function connectRikWebSocket() {
       const json = typeof data === 'string' ? JSON.parse(data) : decodeBinaryMessage(data);
       if (!json) return;
 
-      if (Array.isArray(json) && json[3]?.res?.d1) {
-        const res = json[3].res;
-        if (!rikCurrentSession || res.sid > rikCurrentSession) {
-          rikCurrentSession = res.sid;
-          rikResults.unshift({ sid: res.sid, d1: res.d1, d2: res.d2, d3: res.d3, timestamp: Date.now() });
-          if (rikResults.length > 100) rikResults.pop();
-          saveHistory();
-          console.log(`📥 Phiên mới ${res.sid} → ${getTX(res.d1, res.d2, res.d3)}`);
-          setTimeout(() => { rikWS?.close(); connectRikWebSocket(); }, 1000);
-        }
-      } else if (Array.isArray(json) && json[1]?.htr) {
-        rikResults = json[1].htr.map(i => ({
-          sid: i.sid, d1: i.d1, d2: i.d2, d3: i.d3, timestamp: Date.now()
-        })).sort((a, b) => b.sid - a.sid).slice(0, 100);
-        saveHistory();
-        console.log("📦 Đã tải lịch sử các phiên gần nhất.");
-      }
-    } catch (e) {
-      console.error("❌ Parse error:", e.message);
+      if (Array.isArray(json) && json[3]?.res?.d1) {  
+        const res = json[3].res;  
+        if (!rikCurrentSession || res.sid > rikCurrentSession) {  
+          rikCurrentSession = res.sid;  
+          rikResults.unshift({ 
+            sid: res.sid, 
+            d1: res.d1, 
+            d2: res.d2, 
+            d3: res.d3, 
+            timestamp: Date.now() 
+          });  
+          if (rikResults.length > 100) rikResults.pop();  
+          saveHistory();  
+          console.log(`📥 Phiên mới ${res.sid} → ${getTX(res.d1, res.d2, res.d3)}`);  
+          setTimeout(() => { rikWS?.close(); connectRikWebSocket(); }, 1000);  
+        }  
+      } else if (Array.isArray(json) && json[1]?.htr) {  
+        rikResults = json[1].htr.map(i => ({  
+          sid: i.sid, 
+          d1: i.d1, 
+          d2: i.d2, 
+          d3: i.d3, 
+          timestamp: Date.now()  
+        })).sort((a, b) => b.sid - a.sid).slice(0, 100);  
+        saveHistory();  
+        console.log("📦 Đã tải lịch sử các phiên gần nhất.");  
+      }  
+    } catch (e) {  
+      console.error("❌ Parse error:", e.message);  
     }
   });
 
@@ -195,8 +244,7 @@ function connectRikWebSocket() {
   });
 }
 
-loadHistory();
-connectRikWebSocket();
+// API Endpoints
 fastify.register(cors);
 
 fastify.get("/api/taixiu/sunwin", async () => {
@@ -207,13 +255,25 @@ fastify.get("/api/taixiu/sunwin", async () => {
   const sum = current.d1 + current.d2 + current.d3;
   const ket_qua = sum >= 11 ? "Tài" : "Xỉu";
 
-  const recentTX = valid.map(r => getTX(r.d1, r.d2, r.d3)).slice(0, 30);
-  const predText = predictNext(recentTX);
-  const prediction = {
-    prediction: predText === "Tài" ? "T" : "X",
-    reason: "Dự đoán theo mẫu cầu nâng cao",
-    confidence: 80
-  };
+  // Get last 30 results as TX pattern
+  const recentTX = valid.map(r => getTX(r.d1, r.d2, r.d3)).slice(0, 30).join('');
+  
+  // Get Gemini prediction
+  let geminiPrediction = "Không có dự đoán";
+  let geminiReason = "Không có phân tích";
+  let geminiConfidence = "50";
+  
+  try {
+    const geminiAnalysis = await analyzeWithGemini(recentTX);
+    if (geminiAnalysis) {
+      const lines = geminiAnalysis.split('\n');
+      geminiPrediction = lines.find(l => l.startsWith("Dự đoán:"))?.replace("Dự đoán: ", "") || geminiPrediction;
+      geminiReason = lines.find(l => l.startsWith("Lý do:"))?.replace("Lý do: ", "") || geminiReason;
+      geminiConfidence = lines.find(l => l.startsWith("Độ tin cậy:"))?.match(/\d+/)?.toString() || geminiConfidence;
+    }
+  } catch (error) {
+    console.error("Gemini analysis failed:", error);
+  }
 
   return {
     id: "binhtool90",
@@ -223,26 +283,33 @@ fastify.get("/api/taixiu/sunwin", async () => {
     xuc_xac_3: current.d3,
     tong: sum,
     ket_qua,
-    du_doan: prediction.prediction === "T" ? "Tài" : "Xỉu",
-    ty_le_thanh_cong: `${prediction.confidence}%`,
-    giai_thich: prediction.reason,
-    pattern: analyzePatterns(valid)?.description || "Không phát hiện mẫu cụ thể"
+    du_doan: geminiPrediction,
+    ty_le_thanh_cong: `${geminiConfidence}%`,
+    giai_thich: geminiReason,
+    pattern: recentTX,
+    pattern_analysis: analyzePatterns(valid)?.description || "Không phát hiện mẫu cụ thể"
   };
 });
 
 fastify.get("/api/taixiu/history", async () => {
   const valid = rikResults.filter(r => r.d1 && r.d2 && r.d3);
   if (!valid.length) return { message: "Không có dữ liệu lịch sử." };
+  
   return valid.map(i => ({
     session: i.sid,
     dice: [i.d1, i.d2, i.d3],
     total: i.d1 + i.d2 + i.d3,
-    result: getTX(i.d1, i.d2, i.d3) === "T" ? "Tài" : "Xỉu"
-  })).map(JSON.stringify).join("\n");
+    result: getTX(i.d1, i.d2, i.d3) === "T" ? "Tài" : "Xỉu",
+    timestamp: new Date(i.timestamp).toISOString()
+  }));
 });
 
+// Start server
 const start = async () => {
   try {
+    loadHistory();
+    connectRikWebSocket();
+    
     const address = await fastify.listen({ port: PORT, host: "0.0.0.0" });
     console.log(`🚀 API chạy tại ${address}`);
   } catch (err) {
