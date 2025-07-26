@@ -226,7 +226,7 @@ fastify.get("/api/taixiu/sunwin", async () => {
     du_doan: prediction.prediction === "T" ? "Tài" : "Xỉu",
     ty_le_thanh_cong: `${prediction.confidence}%`,
     giai_thich: prediction.reason,
-    pattern: analyzePatterns(valid)?.description || "Không phát hiện mẫu cụ thể"
+    pattern: valid.slice(0, 13).map(r => getTX(r.d1, r.d2, r.d3).toLowerCase()).join('')
   };
 });
 
