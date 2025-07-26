@@ -222,7 +222,7 @@ function smartPredict(fullHistory, analyzeHistory, currentDice) {
   });
 
   const finalPred = taiScore > xiuScore ? 'Tài' : 'Xỉu';
-  const confidence = Math.round((Math.max(taiScore, xiuScore) / (taiScore + xiuScore)) * 100;
+  const confidence = Math.round((Math.max(taiScore, xiuScore) / (taiScore + xiuScore)) * 100);
 
   // Apply meta-logic (anti-streak)
   let reason = patternInfo ? `Phát hiện mẫu ${patternInfo.name}` : "Phân tích tổng hợp";
