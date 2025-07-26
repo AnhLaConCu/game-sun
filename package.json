@@ -1,7 +1,8 @@
+
 {
   "name": "game-sun",
   "version": "1.0.0",
-  "description": "API theo dõi và dự đoán kết quả Tài Xỉu SunWin",
+  "description": "Tài Xỉu prediction system with Gemini AI integration",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -9,22 +10,24 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
-    "sunwin",
     "taixiu",
-    "game",
-    "api"
+    "prediction",
+    "gemini-ai",
+    "gambling-analysis",
+    "websocket"
   ],
-  "author": "binhtool90",
+  "author": "Your Name <your.email@example.com>",
   "license": "MIT",
   "dependencies": {
     "@fastify/cors": "^8.2.0",
+    "@google/generative-ai": "^0.3.0",
     "fastify": "^4.15.0",
     "ws": "^8.13.0"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2"
+    "nodemon": "^2.0.22"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=16.0.0"
   }
 }
